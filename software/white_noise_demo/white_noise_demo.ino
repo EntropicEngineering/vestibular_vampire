@@ -4,12 +4,23 @@
 
 #define SDA_PIN 14
 #define SCL_PIN 15
+#define V5V_EN_PIN 13
+#define V24V_EN_PIN 22
+#define VREF_EN_PIN 20
+#define ASENSE_EN_PIN 3
+#define RGB_PIN 16
+#define BUTTON1_PIN 21
+#define BUTTON2_PIN 26
+#define BATT_CHARGING_PIN 27
+#define BATT_FULL_PIN 28
+
 #define DAC_ADDRESS 0x62
+#define ASENSE_ADDRESS 0x40
 
 #define BAUD_RATE 115200
 
 //Startup delay, (ms).
-#define STARTUP_DELAY 5000
+#define STARTUP_DELAY 3000
 
 Adafruit_MCP4725 dac;
 
@@ -29,12 +40,39 @@ int noiseTable[numSteps];
 void setup(void)
 {
   Serial.begin(BAUD_RATE);
-  //Set the I2C pins.
-  Wire.setSDA(SDA_PIN);
-  Wire.setSCL(SCL_PIN);
 
-  dac.begin(DAC_ADDRESS);  
-  Wire.setClock(1000000);         
+  //Configure IO pins.
+  pinMode(V5V_EN_PIN, OUTPUT);
+  pinMode(V24V_EN_PIN, OUTPUT);
+  pinMode(VREF_EN_PIN, OUTPUT);
+  pinMode(ASENSE_EN_PIN, OUTPUT);
+  pinMode(RGB_PIN, OUTPUT);
+
+  //Inputs need internal pullups.
+  pinMode(BUTTON1_PIN, INPUT_PULLUP);
+  pinMode(BUTTON2_PIN, INPUT_PULLUP);
+  pinMode(BATT_CHARGING_PIN, INPUT_PULLUP);
+  pinMode(BATT_FULL_PIN, INPUT_PULLUP);
+
+  //Set IO pin defaults.
+  //Bring up current sensor first.
+  digitalWrite(ASENSE_EN_PIN, HIGH);
+  delay(50);
+  //Turn on the reference voltage.
+  digitalWrite(VREF_EN_PIN, HIGH);
+  delay(50);
+  //Turn on the 5V rail (DAC).
+  digitalWrite(V5V_EN_PIN, HIGH);
+  //Keep the 24V rail off for now (no output to the user).
+  digitalWrite(V24V_EN_PIN, LOW);
+  
+  //Set the I2C pins.
+  Wire1.setSDA(SDA_PIN);
+  Wire1.setSCL(SCL_PIN);
+  Wire1.begin();
+
+  //Initialize DAC communication, using the proper Wire1 device.
+  dac.begin(DAC_ADDRESS, &Wire1);  
 
   float mappedOffsetD = mapFloat(offsetD, 0, 8.0, 0, 4095);
   float mappedLimitedArea = mapFloat(limitedArea, 0, 8.0, 0, 4095);
@@ -51,6 +89,9 @@ void setup(void)
     //noiseTable[i] = (int)(random(-actualAmplitude, actualAmplitude) + actualOffset);
 
   }
+
+  //Turn on the main output.
+  digitalWrite(V24V_EN_PIN, HIGH);
 }
 
 void loop()

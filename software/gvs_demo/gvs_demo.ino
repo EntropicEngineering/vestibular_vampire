@@ -7,17 +7,31 @@
 
 #define SDA_PIN 14
 #define SCL_PIN 15
+#define V5V_EN_PIN 13
+#define V24V_EN_PIN 22
+#define VREF_EN_PIN 20
+#define ASENSE_EN_PIN 3
+#define RGB_PIN 16
+#define BUTTON1_PIN 21
+#define BUTTON2_PIN 26
+#define BATT_CHARGING_PIN 27
+#define BATT_FULL_PIN 28
 
 #define DAC_ADDRESS 0x62
+#define ASENSE_ADDRESS 0x40
+
 #define BAUD_RATE 115200
-#define UNITY_PORT 4222
 
 #define SSID "Vestibular Vampire"
 #define PASSWORD "dracula"
+#define UNITY_PORT 4222
+
+//Startup delay, (ms).
+#define STARTUP_DELAY 3000
 
 
 //Instantiate current sensor.
-Adafruit_INA219 ina219;
+Adafruit_INA219 asense(ASENSE_ADDRESS);
 //Create Unity board name.
 Uduino_Wifi uduino("vestibular_vampire");
 //Instantiate DAC.
@@ -44,34 +58,71 @@ unsigned long sineWaveFinalStartTime = 0;
 bool sineWaveHoldFinalVoltage = false;
 bool sineWaveReturnToMidpoint = false;
 
-void setup(void) {
+void setup(void)
+{
   Serial.begin(BAUD_RATE);
-  //Set the I2C pins.
-  Wire.setSDA(SDA_PIN);
-  Wire.setSCL(SCL_PIN);
-  Wire.begin();
 
-  dac.begin(DAC_ADDRESS);
+  //Configure IO pins.
+  pinMode(V5V_EN_PIN, OUTPUT);
+  pinMode(V24V_EN_PIN, OUTPUT);
+  pinMode(VREF_EN_PIN, OUTPUT);
+  pinMode(ASENSE_EN_PIN, OUTPUT);
+  pinMode(RGB_PIN, OUTPUT);
+
+  //Inputs need internal pullups.
+  pinMode(BUTTON1_PIN, INPUT_PULLUP);
+  pinMode(BUTTON2_PIN, INPUT_PULLUP);
+  pinMode(BATT_CHARGING_PIN, INPUT_PULLUP);
+  pinMode(BATT_FULL_PIN, INPUT_PULLUP);
+
+  //Set IO pin defaults.
+  //Bring up current sensor first.
+  digitalWrite(ASENSE_EN_PIN, HIGH);
+  delay(50);
+  //Turn on the reference voltage.
+  digitalWrite(VREF_EN_PIN, HIGH);
+  delay(50);
+  //Turn on the 5V rail (DAC).
+  digitalWrite(V5V_EN_PIN, HIGH);
+  //Keep the 24V rail off for now (no output to the user).
+  digitalWrite(V24V_EN_PIN, LOW);
+
+  //Set the I2C pins.
+  Wire1.setSDA(SDA_PIN);
+  Wire1.setSCL(SCL_PIN);
+  Wire1.begin();
+
+  //Start DAC.
+  dac.begin(DAC_ADDRESS, &Wire1);
+
   //Start current sensor.
-  ina219.begin();
-  ina219.setCalibration_16V_400mA();
+  asense.begin(&Wire1);
+  asense.setCalibration_16V_400mA();
 
   uduino.setPort(UNITY_PORT);
   uduino.useSendBuffer(true);
   uduino.setConnectionTries(35);
   uduino.useSerial(true);
+
   //Wifi setup.
   uduino.connectWifi(SSID, PASSWORD);
   uduino.addCommand("a", Apply);
+
+  delay(STARTUP_DELAY);
+
+  //Turn on the main output.
+  digitalWrite(V24V_EN_PIN, HIGH);
 }
 
-void loop() {
+void loop()
+{
   uduino.update();
   printCurrentValues();
   handleSineWave();
 }
 
-void Apply() {
+void Apply()
+{
   int parameters = uduino.getNumberOfParameters();
   if (parameters >= 3) {
     currentValue = atof(uduino.getParameter(0));
@@ -98,7 +149,8 @@ void Apply() {
   }
 }
 
-void handleSineWave() {
+void handleSineWave()
+{
   if (sineWaveRunning) {
     if (sineWaveStep < sineWaveSteps) {
       // Ascending
@@ -135,10 +187,11 @@ void handleSineWave() {
 }
 
 
-void printCurrentValues() {
+void printCurrentValues()
+{
   if (millis() - lastPrintTime >= printInterval) {
     lastPrintTime = millis();
-    current_mA = ina219.getCurrent_mA();
+    current_mA = asense.getCurrent_mA();
     uduino.println(current_mA);
   }
 }

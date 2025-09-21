@@ -21,11 +21,11 @@ int Correct = 0;
 void setup(void)
 {
   //Set the I2C pins.
-  Wire.setSDA(SDA_PIN);
-  Wire.setSCL(SCL_PIN);
-  Wire.begin();
+  Wire1.setSDA(SDA_PIN);
+  Wire1.setSCL(SCL_PIN);
+  Wire1.begin();
   Wire.setClock(400000);   
-  dac.begin(DAC_ADDRESS);  
+  dac.begin(DAC_ADDRESS, &Wire1);  
   Correct = mapFloat(offsetX, -4.0, 4.0, 0, 4095);
 
   //Set the output voltage, but do not persist after power cycle.
