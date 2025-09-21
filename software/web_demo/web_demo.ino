@@ -1,7 +1,10 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <DNSServer.h>
 #include <Wire.h>
 #include <Adafruit_MCP4725.h>
+#include <Adafruit_INA219.h>
 #include <math.h>
-#include <WiFi.h>
 
 #define SDA_PIN 14
 #define SCL_PIN 15
@@ -19,46 +22,314 @@
 #define ASENSE_ADDRESS 0x40
 
 #define BAUD_RATE 115200
+#define STARTUP_DELAY 1000
 
 #define SSID "Vestibular Vampire"
-#define PASSWORD "dracula"
+#define PASSWORD "12345678"
 
-//Startup delay, (ms).
-#define STARTUP_DELAY 3000
+// Slider values
+int current_slider = 50;   //Range: -3.5 to 3.5 mA
+int slope_slider = 50;     //Range: 0 to 2000 ms
+int duration_slider = 50;  //Range: 0 to 5000 ms
 
+//Instantiate current sensor.
+Adafruit_INA219 asense(ASENSE_ADDRESS);
+//Instantiate DAC.
 Adafruit_MCP4725 dac;
 
-WiFiServer server(80);
+float currentValue = 0;
+int slopeValue = 0;
+int durationValue = 0;
+float offset = 0.58;   //Offset current (mA).
+float current_mA = 0;
 
-String htmlPage = R"rawliteral(
-<!DOCTYPE HTML><html>
-<head><title>Vestibular Vampire Control</title></head>
+unsigned long lastPrintTime = 0;
+const unsigned long printInterval = 50;
+
+unsigned long sineWaveStartTime = 0;
+int sineWaveStep = 0;
+bool sineWaveRunning = false;
+int sineWaveSteps = 0;
+int sineWaveDelayTime = 0;
+int sineWaveAmplitude = 0;
+int sineWaveOffsetValue = 0;
+int sineWaveFinalDuration = 0;
+unsigned long sineWaveFinalStartTime = 0;
+bool sineWaveHoldFinalVoltage = false;
+bool sineWaveReturnToMidpoint = false;
+
+
+/////////////////////////////////////////////////
+//Web page.
+
+
+// Captive portal DNS settings
+const byte DNS_PORT = 53;
+DNSServer dnsServer;
+
+// Web server on port 80
+WebServer server(80);
+
+// Web UI HTML
+const char* htmlPage = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Vestibular Vampire</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f0f0f0;
+      text-align: center;
+      padding: 40px;
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 30px;
+    }
+
+    .slider-container {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      display: inline-block;
+      padding: 20px 40px;
+      margin: 20px;
+      width: 80%;
+      max-width: 500px;
+    }
+
+    label {
+      font-size: 20px;
+      display: block;
+      margin-bottom: 10px;
+    }
+
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 30px;
+      background: #ddd;
+      border-radius: 5px;
+      outline: none;
+      transition: background 0.3s;
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: #4CAF50;
+      cursor: pointer;
+      box-shadow: 0 0 5px rgba(0,0,0,0.2);
+    }
+
+    input[type=range]::-moz-range-thumb {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: #4CAF50;
+      cursor: pointer;
+    }
+
+    .value-display {
+      font-weight: bold;
+      font-size: 24px;
+      color: #4CAF50;
+    }
+
+    #sendButton {
+      margin-top: 30px;
+      padding: 12px 30px;
+      font-size: 18px;
+      border: none;
+      border-radius: 6px;
+      background-color: #4CAF50;
+      color: white;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      transition: background-color 0.3s;
+    }
+
+    #sendButton:hover {
+      background-color: #45a049;
+    }
+
+  </style>
+</head>
 <body>
-  <h1>Control Panel</h1>
-  <form action="/apply" method="POST">
-    Current Value (-4 to 4):<br><input type="number" step="0.01" min="-4" max="4" name="current" required><br>
-    Slope Value (positive integer):<br><input type="number" min="1" name="slope" required><br>
-    Duration Value (ms):<br><input type="number" min="1" name="duration" required><br><br>
-    <input type="submit" value="Apply">
-  </form>
-</body></html>
+  <h1>Vestibular Vampire</h1>
+
+  <div class="slider-container">
+    <label>Current (mA): <span id="val1" class="value-display">0</span></label>
+    <input type="range" id="slider1" min="-3.5" max="3.5" value="0">
+  </div>
+
+  <div class="slider-container">
+    <label>Slope (ms): <span id="val2" class="value-display">200</span></label>
+    <input type="range" id="slider2" min="0" max="2000" value="200">
+  </div>
+
+  <div class="slider-container">
+    <label>Duration (ms): <span id="val3" class="value-display">500</span></label>
+    <input type="range" id="slider3" min="0" max="5000" value="500">
+  </div>
+
+  <br />
+  <br />
+  <br />
+  <button id="sendButton">Send</button>
+
+  <script>
+    const sliders = ['slider1', 'slider2', 'slider3'];
+
+    sliders.forEach(id => {
+      const slider = document.getElementById(id);
+      const valSpan = document.getElementById("val" + id.slice(-1));
+      slider.addEventListener("input", () => {
+        valSpan.textContent = slider.value;
+      });
+    });
+
+    document.getElementById("sendButton").addEventListener("click", () => {
+      const s1 = document.getElementById("slider1").value;
+      const s2 = document.getElementById("slider2").value;
+      const s3 = document.getElementById("slider3").value;
+
+      fetch(`/set?slider1=${s1}&slider2=${s2}&slider3=${s3}`)
+        .then(response => {
+          if (!response.ok) {
+            alert("Failed to send values");
+          }
+        });
+    });
+  </script>
+</body>
+</html>
 )rawliteral";
 
-float mapFloat(float x, float in_min, float in_max, float out_min, float out_max)
+
+
+//End web page.
+////////////////////////////////////////////////////////////////////
+
+
+// Serve root HTML page
+void handleRoot() {
+  server.send(200, "text/html", htmlPage);
+}
+
+// Handle slider updates
+void handleSet() {
+  if (server.hasArg("slider1")) {
+    current_slider = server.arg("slider1").toInt();
+  }
+  if (server.hasArg("slider2")) {
+    slope_slider = server.arg("slider2").toInt();
+  }
+  if (server.hasArg("slider3")) {
+    duration_slider = server.arg("slider3").toInt();
+  }
+
+  server.send(200, "text/plain", "OK");
+
+  Serial.print("Current slider: ");
+  Serial.println(current_slider);
+  Serial.print("Slope slider: ");
+  Serial.println(slope_slider);
+  Serial.print("Duration slider: ");
+  Serial.println(duration_slider);
+
+  apply();
+}
+
+// Redirect unknown URLs to captive portal
+void handleNotFound() {
+  server.sendHeader("Location", "/", true);
+  server.send(302, "text/plain", "");
+}
+
+void apply()
 {
+  currentValue = current_slider;
+  slopeValue = slope_slider;
+  durationValue = duration_slider;
+
+  if (currentValue >= -4 && currentValue <= 4 && slopeValue > 0 && durationValue > 0) {
+    int inputValue = mapFloat(currentValue, -4.0, 4.0, 0, 4095);
+    sineWaveOffsetValue = mapFloat(offset, -4.0, 4.0, 0, 4095) - 2048;
+    sineWaveAmplitude = inputValue - 2048;
+    sineWaveSteps = slopeValue;
+    sineWaveDelayTime = slopeValue / sineWaveSteps; 
+    sineWaveFinalDuration = durationValue;
+    sineWaveStep = 0;
+    sineWaveRunning = true;
+    sineWaveHoldFinalVoltage = false;
+    sineWaveReturnToMidpoint = false;
+    sineWaveStartTime = millis(); 
+  } else {
+    //Serial.println("Invalid parameters");
+  }
+}
+
+void handleSineWave()
+{
+  if (sineWaveRunning) {
+    if (sineWaveStep < sineWaveSteps) {
+      // Ascending
+      if (millis() - sineWaveStartTime >= sineWaveDelayTime) {
+        float angle = (PI / 2.0) * (float)sineWaveStep / (float)sineWaveSteps;
+        int voltage = 2048 + sineWaveAmplitude * sin(angle) + sineWaveOffsetValue;
+        dac.setVoltage(voltage, false);
+        sineWaveStep++;
+        sineWaveStartTime = millis();
+      }
+    } else if (!sineWaveHoldFinalVoltage) {
+      // Holding
+      int finalVoltage = 2048 + sineWaveAmplitude * sin(PI / 2.0) + sineWaveOffsetValue;
+      dac.setVoltage(finalVoltage, false);
+      sineWaveFinalStartTime = millis();
+      sineWaveHoldFinalVoltage = true;
+    } else if (sineWaveHoldFinalVoltage && (millis() - sineWaveFinalStartTime >= sineWaveFinalDuration)) {
+      // Descending 
+      if (sineWaveStep < 2 * sineWaveSteps) {
+        if (millis() - sineWaveStartTime >= sineWaveDelayTime) {
+          float angle = (PI / 2.0) * (float)(sineWaveStep - sineWaveSteps) / (float)sineWaveSteps;
+          int voltage = 2048 + sineWaveAmplitude * sin(PI / 2.0 - angle) + sineWaveOffsetValue;
+          dac.setVoltage(voltage, false);
+          sineWaveStep++;
+          sineWaveStartTime = millis();
+        }
+      } else if (sineWaveStep >= 2 * sineWaveSteps) {
+        // Reset to midpoint
+        dac.setVoltage(2048 + sineWaveOffsetValue, false);
+        sineWaveRunning = false;
+      }
+    }
+  }
+}
+
+void printCurrentValues()
+{
+  if (millis() - lastPrintTime >= printInterval)
+  {
+    lastPrintTime = millis();
+    current_mA = asense.getCurrent_mA();
+    //Serial.print("\rCurrent: ");
+    //Serial.print(current_mA);
+    //Serial.print(" mA");
+  }
+}
+
+int mapFloat(float x, float in_min, float in_max, int out_min, int out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-const int maxAmplitude = 2048;    
-const int baseOffset = 2048;      
-float offsetD = 0.04;             
-float limitedArea = 3.6;          
-const int numSteps = 100;          
-
-int noiseTable[numSteps];         
-
-void setup(void)
-{
+void setup() {
   Serial.begin(BAUD_RATE);
 
   //Configure IO pins.
@@ -83,45 +354,41 @@ void setup(void)
   delay(50);
   //Turn on the 5V rail (DAC).
   digitalWrite(V5V_EN_PIN, HIGH);
-  //Keep the 24V rail off for now (no output to the user).
+  //Keep the 24V rail off for now (no output to the subject).
   digitalWrite(V24V_EN_PIN, LOW);
-  
+
   //Set the I2C pins.
   Wire1.setSDA(SDA_PIN);
   Wire1.setSCL(SCL_PIN);
   Wire1.begin();
 
-  //Initialize DAC communication, using the proper Wire1 device.
-  dac.begin(DAC_ADDRESS, &Wire1);  
+  //Start DAC.
+  dac.begin(DAC_ADDRESS, &Wire1);
+  sineWaveOffsetValue = mapFloat(offset, -4.0, 4.0, 0, 4095) - 2048;
+  // Reset to midpoint
+  dac.setVoltage(2048 + sineWaveOffsetValue, false);
 
-  float mappedOffsetD = mapFloat(offsetD, 0, 8.0, 0, 4095);
-  float mappedLimitedArea = mapFloat(limitedArea, 0, 8.0, 0, 4095);
-  float actualAmplitude = mappedLimitedArea / 2.0;  
-  float actualOffset = baseOffset + mappedOffsetD;
-  dac.setVoltage((int)actualOffset, false); 
-  
-  //Generate an array of random values, witin constraints.
-  for (int i = 0; i < numSteps; i++)
-  {
-    noiseTable[i] = (int)(random(-maxAmplitude, maxAmplitude) + actualOffset);
-    //Original line:
-    //noiseTable[i] = (int)(random(-actualAmplitude, actualAmplitude) + actualOffset);
+  //Start current sensor.
+  asense.begin(&Wire1);
+  asense.setCalibration_16V_400mA();
 
-  }
+  delay(STARTUP_DELAY);
 
-  WiFi.begin(SSID, PASSWORD);
-  Serial.print("Connecting to WiFi...");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  
-  Serial.println();
-  Serial.print("Connected! IP address: ");
-  Serial.println(WiFi.localIP());
-  
+  // Start WiFi in AP mode
+  WiFi.softAP(SSID, PASSWORD);
+  IPAddress myIP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(myIP);
+
+  // Start DNS server — redirect all requests to our IP
+  dnsServer.start(DNS_PORT, "*", myIP);
+
+  // Start web server
+  server.on("/", handleRoot);
+  server.on("/set", handleSet);
+  server.onNotFound(handleNotFound);
   server.begin();
-
+  Serial.println("Web server started");
 
   //Turn on the main output.
   digitalWrite(V24V_EN_PIN, HIGH);
@@ -129,18 +396,8 @@ void setup(void)
 
 void loop()
 {
-  int delayTime = 100000 / numSteps; 
-
-  //Step through the array of random values.
-  for (int i = 0; i < numSteps; i++)
-  {
-    //Set the output voltage based on the current random value.
-    dac.setVoltage(noiseTable[i], false);
-    delayMicroseconds(delayTime);  
-
-    //Generate a new random value for this array index.
-    noiseTable[i] = (int)(random(-maxAmplitude, maxAmplitude) + baseOffset);
-    //Original line:
-    //noiseTable[i] = (int)(random(-actualAmplitude, actualAmplitude) + baseOffset);
-  }
+  dnsServer.processNextRequest();
+  server.handleClient();
+  printCurrentValues();
+  handleSineWave();
 }
