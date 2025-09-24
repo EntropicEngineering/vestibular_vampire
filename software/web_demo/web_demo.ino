@@ -12,14 +12,18 @@
 #define V24V_EN_PIN 22
 #define VREF_EN_PIN 20
 #define ASENSE_EN_PIN 3
-#define RGB_PIN 16
+#define RGB_LED_PIN 16
 #define BUTTON1_PIN 21
 #define BUTTON2_PIN 26
 #define BATT_CHARGING_PIN 27
 #define BATT_FULL_PIN 28
 
-#define DAC_ADDRESS 0x62
+#define DAC_ADDRESS 0x60
+//#define DAC_ADDRESS 0x62  //Dev kit only.
 #define ASENSE_ADDRESS 0x40
+#define IMU_ADDRESS 0x19
+
+#define RGB_LED_COUNT 7
 
 #define BAUD_RATE 115200
 #define STARTUP_DELAY 1000
@@ -28,7 +32,7 @@
 #define PASSWORD "12345678"
 
 // Slider values
-int current_slider = 50;   //Range: -3.5 to 3.5 mA
+float current_slider = 0.0; //Range: -3.5 to 3.5 mA
 int slope_slider = 50;     //Range: 0 to 2000 ms
 int duration_slider = 50;  //Range: 0 to 5000 ms
 
@@ -37,10 +41,10 @@ Adafruit_INA219 asense(ASENSE_ADDRESS);
 //Instantiate DAC.
 Adafruit_MCP4725 dac;
 
-float currentValue = 0;
+float currentValue = 0.0;
 int slopeValue = 0;
 int durationValue = 0;
-float offset = 0.58;   //Offset current (mA).
+float offset = 0.085;   //Offset current (mA).
 float current_mA = 0;
 
 unsigned long lastPrintTime = 0;
@@ -166,17 +170,17 @@ const char* htmlPage = R"rawliteral(
 
   <div class="slider-container">
     <label>Current (mA): <span id="val1" class="value-display">0</span></label>
-    <input type="range" id="slider1" min="-3.5" max="3.5" value="0">
+    <input type="range" id="slider1" min="-3.5" max="3.5" step="0.1" value="0">
   </div>
 
   <div class="slider-container">
     <label>Slope (ms): <span id="val2" class="value-display">200</span></label>
-    <input type="range" id="slider2" min="0" max="2000" value="200">
+    <input type="range" id="slider2" min="0" max="2000" step="10" value="200">
   </div>
 
   <div class="slider-container">
     <label>Duration (ms): <span id="val3" class="value-display">500</span></label>
-    <input type="range" id="slider3" min="0" max="5000" value="500">
+    <input type="range" id="slider3" min="0" max="5000" step="10" value="500">
   </div>
 
   <br />
@@ -226,7 +230,7 @@ void handleRoot() {
 // Handle slider updates
 void handleSet() {
   if (server.hasArg("slider1")) {
-    current_slider = server.arg("slider1").toInt();
+    current_slider = server.arg("slider1").toFloat();
   }
   if (server.hasArg("slider2")) {
     slope_slider = server.arg("slider2").toInt();
