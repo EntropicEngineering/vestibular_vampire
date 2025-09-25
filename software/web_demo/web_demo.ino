@@ -4,6 +4,7 @@
 #include <Wire.h>
 #include <Adafruit_MCP4725.h>
 #include <Adafruit_INA219.h>
+#include <Adafruit_NeoPixel.h>
 #include <math.h>
 
 #define SDA_PIN 14
@@ -13,20 +14,20 @@
 #define VREF_EN_PIN 20
 #define ASENSE_EN_PIN 3
 #define RGB_LED_PIN 16
-#define BUTTON1_PIN 21
-#define BUTTON2_PIN 26
-#define BATT_CHARGING_PIN 27
-#define BATT_FULL_PIN 28
+#define BUTTON1_PIN 21  //Active low.
+#define BUTTON2_PIN 26  //Active low.
+#define BATT_CHARGING_PIN 27  //Active low.
+#define BATT_FULL_PIN 28  //Active low.
 
 #define DAC_ADDRESS 0x60
 //#define DAC_ADDRESS 0x62  //Dev kit only.
 #define ASENSE_ADDRESS 0x40
 #define IMU_ADDRESS 0x19
 
-#define RGB_LED_COUNT 7
+#define RGB_LED_COUNT 7 //The "teeth" are #1 and #5.
 
 #define BAUD_RATE 115200
-#define STARTUP_DELAY 1000
+#define STARTUP_DELAY 0
 
 #define SSID "Vestibular Vampire"
 #define PASSWORD "12345678"
@@ -40,6 +41,8 @@ int duration_slider = 50;  //Range: 0 to 5000 ms
 Adafruit_INA219 asense(ASENSE_ADDRESS);
 //Instantiate DAC.
 Adafruit_MCP4725 dac;
+//Instantiate RGB LEDs.
+Adafruit_NeoPixel rgb_leds = Adafruit_NeoPixel(RGB_LED_COUNT, RGB_LED_PIN, NEO_GRB + NEO_KHZ800);
 
 float currentValue = 0.0;
 int slopeValue = 0;
@@ -333,7 +336,48 @@ int mapFloat(float x, float in_min, float in_max, int out_min, int out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-void setup() {
+//Short startup animation of the RGB LEDs.  Blocking.
+void rgb_startup()
+{
+  //Turn on one additional LED at a time in sequence.
+  for (int i=0; i<RGB_LED_COUNT; i++)
+  {
+    //Set the LED red.
+    rgb_leds.setPixelColor(i, rgb_leds.Color(255, 0, 0));
+    //Display this change.
+    rgb_leds.show();
+
+    //Small delay before switching to the next LED.
+    delay(100);
+  }
+
+  //Turn everything off again.
+  rgb_leds.clear();
+  rgb_leds.show();
+}
+
+//Read the battery status pins, and display light accordingly.
+void battery_status()
+{
+  //If the battery is full, display green.  If charging, display yellow.  Otherwise off.
+  if (!digitalRead(BATT_FULL_PIN))
+  {
+    rgb_leds.setPixelColor(0, rgb_leds.Color(0, 200, 20));
+  }
+  else if (!digitalRead(BATT_CHARGING_PIN))
+  {
+    rgb_leds.setPixelColor(0, rgb_leds.Color(200, 20, 0));
+  }
+  else
+  {
+    rgb_leds.setPixelColor(0, rgb_leds.Color(0, 0, 0));
+  }
+  
+  rgb_leds.show();
+}
+
+void setup()
+{
   Serial.begin(BAUD_RATE);
 
   //Configure IO pins.
@@ -341,7 +385,7 @@ void setup() {
   pinMode(V24V_EN_PIN, OUTPUT);
   pinMode(VREF_EN_PIN, OUTPUT);
   pinMode(ASENSE_EN_PIN, OUTPUT);
-  pinMode(RGB_PIN, OUTPUT);
+  pinMode(RGB_LED_PIN, OUTPUT);
 
   //Inputs need internal pullups.
   pinMode(BUTTON1_PIN, INPUT_PULLUP);
@@ -376,6 +420,11 @@ void setup() {
   asense.begin(&Wire1);
   asense.setCalibration_16V_400mA();
 
+  //Start RGB LEDs.
+  rgb_leds.begin();
+  //Initialize to off.
+  rgb_leds.show();
+
   delay(STARTUP_DELAY);
 
   // Start WiFi in AP mode
@@ -396,6 +445,9 @@ void setup() {
 
   //Turn on the main output.
   digitalWrite(V24V_EN_PIN, HIGH);
+
+  //Flash the LEDs to indicate startup is complete.
+  rgb_startup();
 }
 
 void loop()
@@ -404,4 +456,5 @@ void loop()
   server.handleClient();
   printCurrentValues();
   handleSineWave();
+  battery_status();
 }
