@@ -24,13 +24,21 @@
 #define ASENSE_ADDRESS 0x40
 #define IMU_ADDRESS 0x19
 
-#define RGB_LED_COUNT 7 //The "teeth" are #1 and #5.
+#define RGB_LED_COUNT 7 //The "teeth" are #1 and #5.  Center is #3.
 
 #define BAUD_RATE 115200
 #define STARTUP_DELAY 0
 
 #define SSID "Vestibular Vampire"
 #define PASSWORD "12345678"
+
+#define BUTTON1_CURRENT 3.0
+#define BUTTON1_SLOPE 200
+#define BUTTON1_DURATION  1000
+
+#define BUTTON2_CURRENT -3.0
+#define BUTTON2_SLOPE 200
+#define BUTTON2_DURATION  1000
 
 // Slider values
 float current_slider = 0.0; //Range: -3.5 to 3.5 mA
@@ -356,24 +364,82 @@ void rgb_startup()
   rgb_leds.show();
 }
 
-//Read the battery status pins, and display light accordingly.
-void battery_status()
+//Set the RGB lights.
+void set_rgb_leds()
 {
-  //If the battery is full, display green.  If charging, display yellow.  Otherwise off.
-  if (!digitalRead(BATT_FULL_PIN))
+  //If the unit is outputting a pulse, display light in the corresponding direction.
+  if (sineWaveRunning)
   {
-    rgb_leds.setPixelColor(0, rgb_leds.Color(0, 200, 20));
+    //Turn off any other status indicators.
+    rgb_leds.clear();
+
+    //If it's a positive (right) pulse, light LEDs on one side.
+    if (currentValue > 0)
+    {
+      rgb_leds.setPixelColor(0, rgb_leds.Color(200, 0, 0));
+      rgb_leds.setPixelColor(1, rgb_leds.Color(200, 0, 0));
+    }
+    //If it's a negative (left) pulse, light LEDs on the other side.
+    else if (currentValue < 0)
+    {
+      rgb_leds.setPixelColor(6, rgb_leds.Color(200, 0, 0));
+      rgb_leds.setPixelColor(5, rgb_leds.Color(200, 0, 0));
+    }
   }
-  else if (!digitalRead(BATT_CHARGING_PIN))
-  {
-    rgb_leds.setPixelColor(0, rgb_leds.Color(200, 20, 0));
-  }
+  //Otherwise display battery status.
   else
   {
-    rgb_leds.setPixelColor(0, rgb_leds.Color(0, 0, 0));
+    //Turn off LEDs when done with a pulse.
+    rgb_leds.clear();
+
+    //Read the battery status pins, and display light accordingly.
+    //If the battery is full, display green.  If charging, display yellow.  Otherwise off.
+    if (!digitalRead(BATT_FULL_PIN))
+    {
+      rgb_leds.setPixelColor(3, rgb_leds.Color(0, 200, 20));
+    }
+    else if (!digitalRead(BATT_CHARGING_PIN))
+    {
+      rgb_leds.setPixelColor(3, rgb_leds.Color(200, 20, 0));
+    }
+    else
+    {
+      rgb_leds.setPixelColor(3, rgb_leds.Color(0, 0, 0));
+    }
   }
   
   rgb_leds.show();
+}
+
+//Read the physical buttons.
+void read_buttons()
+{
+  //Only proceed if the unit is idle.
+  if (!sineWaveRunning)
+  {
+    //If button 1 is pressed, create a pulse.
+    if (!digitalRead(BUTTON1_PIN))
+    {
+      //Create a pulse.
+      current_slider  = BUTTON1_CURRENT;
+      slope_slider    = BUTTON1_SLOPE;
+      duration_slider = BUTTON1_DURATION;
+
+      //Send the pulse.
+      apply();
+    }
+    //If button 2 is pressed, create a pulse.
+    else if (!digitalRead(BUTTON2_PIN))
+    {
+      //Create a pulse.
+      current_slider  = BUTTON2_CURRENT;
+      slope_slider    = BUTTON2_SLOPE;
+      duration_slider = BUTTON2_DURATION;
+
+      //Send the pulse.
+      apply();
+    }
+  }
 }
 
 void setup()
@@ -456,5 +522,6 @@ void loop()
   server.handleClient();
   printCurrentValues();
   handleSineWave();
-  battery_status();
+  set_rgb_leds();
+  read_buttons();
 }
