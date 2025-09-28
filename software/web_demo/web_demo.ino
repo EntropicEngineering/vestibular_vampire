@@ -93,33 +93,31 @@ const char* htmlPage = R"rawliteral(
   <meta charset="UTF-8">
   <title>Vestibular Vampire</title>
   <style>
-    body {
+    body
+    {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       background-color: #f0f0f0;
       text-align: center;
-      padding: 40px;
     }
 
-    h1 {
-      color: #333;
+    h1
+    {
+      color: black;
       margin-bottom: 30px;
+      font-size: 5.5em;
     }
 
     .slider-container {
       background: #fff;
-      border-radius: 8px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-      display: inline-block;
-      padding: 20px 40px;
-      margin: 20px;
-      width: 80%;
-      max-width: 500px;
+      padding: 1em 1em;
+      margin: 2.5rem 1rem 0 1rem;
     }
 
     label {
-      font-size: 20px;
+      font-size: 4em;
       display: block;
-      margin-bottom: 10px;
+      margin-bottom: 1.5rem;
     }
 
     input[type=range] {
@@ -130,48 +128,45 @@ const char* htmlPage = R"rawliteral(
       border-radius: 5px;
       outline: none;
       transition: background 0.3s;
+      margin: 3rem 0;
     }
 
     input[type=range]::-webkit-slider-thumb {
       -webkit-appearance: none;
       appearance: none;
-      width: 30px;
-      height: 30px;
+      width: 7rem;
+      height: 7rem;
       border-radius: 50%;
-      background: #4CAF50;
+      background: #b81d1d;
       cursor: pointer;
       box-shadow: 0 0 5px rgba(0,0,0,0.2);
     }
 
     input[type=range]::-moz-range-thumb {
-      width: 30px;
-      height: 30px;
+      width: 7rem;
+      height: 7rem;
       border-radius: 50%;
-      background: #4CAF50;
+      background: #b81d1d;
       cursor: pointer;
     }
 
     .value-display {
       font-weight: bold;
-      font-size: 24px;
-      color: #4CAF50;
+      color: #b81d1d;
     }
 
     #sendButton {
-      margin-top: 30px;
-      padding: 12px 30px;
-      font-size: 18px;
+      width: calc(100% - 40px);
+      padding: 0.5em 0 0.5em 0;
+      margin: 10rem 1rem 0 1rem;
+      font-size: 3em;
+      font-weight: bold;
       border: none;
-      border-radius: 6px;
-      background-color: #4CAF50;
+      background-color: #b81d1d;
       color: white;
       cursor: pointer;
       box-shadow: 0 2px 4px rgba(0,0,0,0.2);
       transition: background-color 0.3s;
-    }
-
-    #sendButton:hover {
-      background-color: #45a049;
     }
 
   </style>
@@ -195,8 +190,7 @@ const char* htmlPage = R"rawliteral(
   </div>
 
   <br />
-  <br />
-  <br />
+
   <button id="sendButton">Send</button>
 
   <script>
