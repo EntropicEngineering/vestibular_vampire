@@ -6,6 +6,7 @@
 #include <Adafruit_INA219.h>
 #include <Adafruit_NeoPixel.h>
 #include <math.h>
+#include <Arduino.h>
 
 #define SDA_PIN 14
 #define SCL_PIN 15
@@ -28,6 +29,7 @@
 
 #define BAUD_RATE 115200
 #define STARTUP_DELAY 0
+#define SLEEP_TIMEOUT_SECONDS 600 //Seconds of inactivity before activating sleep mode.
 
 #define SSID "Vestibular Vampire"
 #define PASSWORD "12345678"
@@ -39,6 +41,10 @@
 #define BUTTON2_CURRENT -3.0
 #define BUTTON2_SLOPE 200
 #define BUTTON2_DURATION  1000
+
+//Sleep timer.
+unsigned long last_activity = 0;
+bool interrupt = 0;
 
 // Slider values
 float current_slider = 0.0; //Range: -3.5 to 3.5 mA
@@ -103,13 +109,20 @@ const char* htmlPage = R"rawliteral(
     h1
     {
       color: black;
-      margin-bottom: 30px;
+      margin-top: 0.1em;
+      margin-bottom: 0.5em;
       font-size: 5.5em;
+    }
+
+    h2
+    {
+      color: black;
+      font-size: 2em;
     }
 
     .slider-container {
       background: #fff;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      box-shadow: 0 0.5em 1em rgba(0,0,0,0.1);
       padding: 1em 1em;
       margin: 2.5rem 1rem 0 1rem;
     }
@@ -117,15 +130,20 @@ const char* htmlPage = R"rawliteral(
     label {
       font-size: 4em;
       display: block;
-      margin-bottom: 1.5rem;
+    }
+
+    .lr {
+      font-size: 4em;
+      display: block;
+      margin: 0;
     }
 
     input[type=range] {
       -webkit-appearance: none;
       width: 100%;
-      height: 30px;
+      height: 2em;
       background: #ddd;
-      border-radius: 5px;
+      border-radius: 1em;
       outline: none;
       transition: background 0.3s;
       margin: 3rem 0;
@@ -139,7 +157,7 @@ const char* htmlPage = R"rawliteral(
       border-radius: 50%;
       background: #b81d1d;
       cursor: pointer;
-      box-shadow: 0 0 5px rgba(0,0,0,0.2);
+      box-shadow: 0 0.5em 1em rgba(0,0,0,0.1);
     }
 
     input[type=range]::-moz-range-thumb {
@@ -158,14 +176,14 @@ const char* htmlPage = R"rawliteral(
     #sendButton {
       width: calc(100% - 40px);
       padding: 0.5em 0 0.5em 0;
-      margin: 10rem 1rem 0 1rem;
+      margin: 8rem 1rem 0 1rem;
       font-size: 3em;
       font-weight: bold;
       border: none;
       background-color: #b81d1d;
       color: white;
       cursor: pointer;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      box-shadow: 0 0.5em 1em rgba(0,0,0,0.1);
       transition: background-color 0.3s;
     }
 
@@ -176,6 +194,7 @@ const char* htmlPage = R"rawliteral(
 
   <div class="slider-container">
     <label>Current (mA): <span id="val1" class="value-display">0</span></label>
+    <p class="lr" style="text-align:left; color: #0000b8;">Left<span style="float:right; color: #b81d1d;">Right</span>
     <input type="range" id="slider1" min="-3.5" max="3.5" step="0.1" value="0">
   </div>
 
@@ -189,9 +208,11 @@ const char* htmlPage = R"rawliteral(
     <input type="range" id="slider3" min="0" max="5000" step="10" value="500">
   </div>
 
-  <br />
+  <h2>Made by Rachel at Entropic Engineering</h2>
 
   <button id="sendButton">Send</button>
+
+  <p>This device is based on the research of Zhi Liu, Shieru Suzuki, Tatsuki Fushimi, and Yoichi Ochiai.</p>
 
   <script>
     const sliders = ['slider1', 'slider2', 'slider3'];
@@ -283,11 +304,15 @@ void apply()
   } else {
     //Serial.println("Invalid parameters");
   }
+
+  //Reset sleep timeout.
+  last_activity = millis();
 }
 
 void handleSineWave()
 {
-  if (sineWaveRunning) {
+  if (sineWaveRunning)
+  {
     if (sineWaveStep < sineWaveSteps) {
       // Ascending
       if (millis() - sineWaveStartTime >= sineWaveDelayTime) {
@@ -319,6 +344,9 @@ void handleSineWave()
         sineWaveRunning = false;
       }
     }
+
+    //Reset sleep timeout.
+    last_activity = millis();
   }
 }
 
@@ -391,10 +419,16 @@ void set_rgb_leds()
     if (!digitalRead(BATT_FULL_PIN))
     {
       rgb_leds.setPixelColor(3, rgb_leds.Color(0, 200, 20));
+
+      //Reset sleep timeout.
+      last_activity = millis();
     }
     else if (!digitalRead(BATT_CHARGING_PIN))
     {
       rgb_leds.setPixelColor(3, rgb_leds.Color(200, 20, 0));
+
+      //Reset sleep timeout.
+      last_activity = millis();
     }
     else
     {
@@ -436,24 +470,51 @@ void read_buttons()
   }
 }
 
-void setup()
+//Enter power-saving sleep mode.
+void powerdown()
 {
-  Serial.begin(BAUD_RATE);
+  Serial.println("Going to sleep...");
 
-  //Configure IO pins.
-  pinMode(V5V_EN_PIN, OUTPUT);
-  pinMode(V24V_EN_PIN, OUTPUT);
-  pinMode(VREF_EN_PIN, OUTPUT);
-  pinMode(ASENSE_EN_PIN, OUTPUT);
-  pinMode(RGB_LED_PIN, OUTPUT);
+  //Turn off LEDs.
+  rgb_leds.clear();
+  rgb_leds.show();
 
-  //Inputs need internal pullups.
-  pinMode(BUTTON1_PIN, INPUT_PULLUP);
-  pinMode(BUTTON2_PIN, INPUT_PULLUP);
-  pinMode(BATT_CHARGING_PIN, INPUT_PULLUP);
-  pinMode(BATT_FULL_PIN, INPUT_PULLUP);
+  //Turn off the main output.
+  digitalWrite(V24V_EN_PIN, LOW);
+  //Turn off current sensor.
+  digitalWrite(ASENSE_EN_PIN, LOW);
+  //Turn off reference voltage.
+//  digitalWrite(VREF_EN_PIN, LOW);
+  //Turn of 5V rail (DAC).
+//  digitalWrite(V5V_EN_PIN, LOW);
 
-  //Set IO pin defaults.
+  //Turn off the radio.
+  WiFi.disconnect();
+  WiFi.mode(WIFI_OFF);
+  delay(100);
+
+  //Wake on either button press.
+  attachInterrupt(digitalPinToInterrupt(BUTTON1_PIN), powerup, FALLING);
+  attachInterrupt(digitalPinToInterrupt(BUTTON2_PIN), powerup, FALLING);
+
+  //Go to sleep, and wait for interrupt.
+  while ((millis() - last_activity) > (SLEEP_TIMEOUT_SECONDS * 1000))
+  {
+    delay(50);
+  }
+}
+
+void powerup()
+{
+  //Turn off interrupts.
+  detachInterrupt(digitalPinToInterrupt(BUTTON1_PIN));
+  detachInterrupt(digitalPinToInterrupt(BUTTON2_PIN));
+
+  //Reset sleep timeout.
+  last_activity = millis();
+
+  Serial.println("Powering up!");
+
   //Bring up current sensor first.
   digitalWrite(ASENSE_EN_PIN, HIGH);
   delay(50);
@@ -485,15 +546,13 @@ void setup()
   //Initialize to off.
   rgb_leds.show();
 
-  delay(STARTUP_DELAY);
-
   // Start WiFi in AP mode
   WiFi.softAP(SSID, PASSWORD);
   IPAddress myIP = WiFi.softAPIP();
   Serial.print("AP IP address: ");
   Serial.println(myIP);
 
-  // Start DNS server — redirect all requests to our IP
+  // Start DNS server wiht captive portal.
   dnsServer.start(DNS_PORT, "*", myIP);
 
   // Start web server
@@ -503,11 +562,41 @@ void setup()
   server.begin();
   Serial.println("Web server started");
 
+  delay(STARTUP_DELAY);
+
   //Turn on the main output.
   digitalWrite(V24V_EN_PIN, HIGH);
 
   //Flash the LEDs to indicate startup is complete.
   rgb_startup();
+}
+
+void check_sleep()
+{
+  if ((millis() - last_activity) > (SLEEP_TIMEOUT_SECONDS * 1000))
+  {
+    powerdown();
+  }
+}
+
+void setup()
+{
+  Serial.begin(BAUD_RATE);
+
+  //Configure IO pins.
+  pinMode(V5V_EN_PIN, OUTPUT);
+  pinMode(V24V_EN_PIN, OUTPUT);
+  pinMode(VREF_EN_PIN, OUTPUT);
+  pinMode(ASENSE_EN_PIN, OUTPUT);
+  pinMode(RGB_LED_PIN, OUTPUT);
+
+  //Inputs need internal pullups.
+  pinMode(BUTTON1_PIN, INPUT_PULLUP);
+  pinMode(BUTTON2_PIN, INPUT_PULLUP);
+  pinMode(BATT_CHARGING_PIN, INPUT_PULLUP);
+  pinMode(BATT_FULL_PIN, INPUT_PULLUP);
+
+  powerup();
 }
 
 void loop()
@@ -518,4 +607,5 @@ void loop()
   handleSineWave();
   set_rgb_leds();
   read_buttons();
+  check_sleep();
 }
